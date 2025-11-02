@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ReconResult } from '../types'
 
-const props = defineProps<{ result: ReconResult | null }>()
+defineProps<{ result: ReconResult | null }>()
 </script>
 
 <template>
