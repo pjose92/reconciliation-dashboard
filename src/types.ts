@@ -39,3 +39,14 @@ export interface ReconResult {
     sumDiff: number
   }
 }
+
+export type ValidationError = {
+  row: number
+  reason: string
+  raw: Record<string, any>
+}
+
+export type ValidationResult<T> = {
+  valid: T[]
+  invalid: ValidationError[]
+}
