@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import Papa from 'papaparse'
-import type { BankTxn, MerchantTxn } from '../types'
+import type { BankTxn, MerchantTxn, ValidationError } from '../types'
+
 
 const emit = defineEmits<{
   (e: 'loaded', payload: { merchant: MerchantTxn[]; bank: BankTxn[] }): void
@@ -23,13 +24,62 @@ const success = ref(false)
 const successMsg = ref('Files uploaded and parsed successfully')
 const durationMs = 2500
 
-function parseCsv<T>(file: File): Promise<T[]> {
+const merchantErrors = ref<ValidationError[]>([])
+const bankErrors = ref<ValidationError[]>([])
+
+function downloadRejected() {
+  const rows = [
+    ...merchantErrors.value.map(e => ({ source: 'merchant', ...e.raw, reason: e.reason })),
+    ...bankErrors.value.map(e => ({ source: 'bank', ...e.raw, reason: e.reason })),
+  ]
+
+  const csv = Papa.unparse(rows)
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'rejected_rows.csv'
+  a.click()
+
+  URL.revokeObjectURL(url)
+}
+
+function parseAndValidateCsv<T extends { transactionId?: any; date?: any; amount?: any }>(
+  file: File
+): Promise<import('../types').ValidationResult<T>> {
   return new Promise((resolve, reject) => {
+    const valid: T[] = []
+    const invalid: import('../types').ValidationError[] = []
+
     Papa.parse<T>(file, {
       header: true,
       dynamicTyping: true,
       skipEmptyLines: true,
-      complete: (results) => resolve(results.data as T[]),
+      complete: (results) => {
+        results.data.forEach((row: any, index: number) => {
+          const rowNumber = index + 2 // account for header row
+
+          if (!row.transactionId) {
+            invalid.push({ row: rowNumber, reason: 'Missing transactionId', raw: row })
+            return
+          }
+
+          if (!row.date || isNaN(Date.parse(row.date))) {
+            invalid.push({ row: rowNumber, reason: 'Invalid date', raw: row })
+            return
+          }
+
+          if (typeof row.amount !== 'number' || isNaN(row.amount)) {
+            invalid.push({ row: rowNumber, reason: 'Invalid amount', raw: row })
+            return
+          }
+
+          valid.push(row as T)
+        })
+
+        resolve({ valid, invalid })
+      },
       error: (err) => reject(err),
     })
   })
@@ -92,21 +142,50 @@ async function handleParse() {
     error.value = 'Please choose both files.'
     return
   }
+
   error.value = null
   parsing.value = true
+
   try {
-    const [merchant, bank] = await Promise.all([
-      parseCsv<MerchantTxn>(merchantFile.value!),
-      parseCsv<BankTxn>(bankFile.value!),
+    const [merchantRes, bankRes] = await Promise.all([
+      parseAndValidateCsv<MerchantTxn>(merchantFile.value!),
+      parseAndValidateCsv<BankTxn>(bankFile.value!),
     ])
 
-    const requiredM = ['transactionId', 'date', 'amount']
-    const requiredB = ['transactionId', 'date', 'amount']
-    for (const f of requiredM) if (!(f in merchant[0])) throw new Error(`Merchant file missing field: ${f}`)
-    for (const f of requiredB) if (!(f in bank[0])) throw new Error(`Bank file missing field: ${f}`)
+    // store validation errors
+    merchantErrors.value = merchantRes.invalid
+    bankErrors.value = bankRes.invalid
 
-    emit('loaded', { merchant, bank })
-    showSuccess('Files uploaded and parsed successfully')
+    // Ensure we have at least 1 valid row before checking fields
+    if (!merchantRes.valid.length)
+      throw new Error('Merchant file has no valid rows.')
+
+    if (!bankRes.valid.length)
+      throw new Error('Bank file has no valid rows.')
+
+    const required = ['transactionId', 'date', 'amount']
+
+    for (const f of required)
+      if (!(f in merchantRes.valid[0]))
+        throw new Error(`Merchant file missing field: ${f}`)
+
+    for (const f of required)
+      if (!(f in bankRes.valid[0]))
+        throw new Error(`Bank file missing field: ${f}`)
+
+    emit('loaded', {
+      merchant: merchantRes.valid,
+      bank: bankRes.valid,
+    })
+
+    showSuccess(
+      `Parsed ${
+        merchantRes.valid.length + bankRes.valid.length
+      } rows · ${
+        merchantRes.invalid.length + bankRes.invalid.length
+      } rejected`
+    )
+
   } catch (e: any) {
     error.value = e.message || 'Failed to parse files'
   } finally {
@@ -169,6 +248,22 @@ async function handleParse() {
     <button class="primary" :disabled="parsing" @click="handleParse">
       {{ parsing ? 'Parsing…' : 'Parse & Load' }}
     </button>
+
+    <div v-if="merchantErrors.length || bankErrors.length" class="card warn">
+  <h3>Validation Issues</h3>
+
+  <p v-if="merchantErrors.length">
+    Merchant rejected rows: <strong>{{ merchantErrors.length }}</strong>
+  </p>
+
+  <p v-if="bankErrors.length">
+    Bank rejected rows: <strong>{{ bankErrors.length }}</strong>
+  </p>
+
+  <button class="secondary" @click="downloadRejected">
+    Download Rejected Rows
+  </button>
+</div>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
