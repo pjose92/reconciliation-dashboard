@@ -50,3 +50,19 @@ export type ValidationResult<T> = {
   valid: T[]
   invalid: ValidationError[]
 }
+
+export type MatchReason =
+  | 'EXACT_ID'
+  | 'AMOUNT_TOLERANCE'
+  | 'AMOUNT_MISMATCH'
+  | 'MISSING_IN_BANK'
+  | 'MISSING_IN_MERCHANT'
+
+export interface ReconMatch {
+  transactionId: string
+  merchant: MerchantTxn | null
+  bank: BankTxn | null
+  status: 'matched' | 'missing_in_bank' | 'missing_in_merchant' | 'amount_mismatch'
+  diff: number
+  matchReason: MatchReason
+}

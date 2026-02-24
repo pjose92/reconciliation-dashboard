@@ -20,25 +20,63 @@ export function reconcile(
     const b = bankMap.get(key) || null
 
     if (!b) {
-      matches.push({ transactionId: m.transactionId, merchant: m, bank: null, status: 'missing_in_bank', diff: 0 })
+      matches.push({
+        transactionId: m.transactionId,
+        merchant: m,
+        bank: null,
+        status: 'missing_in_bank',
+        diff: 0,
+        matchReason: 'MISSING_IN_BANK',
+      })
       continue
     }
 
     const diff = +(b.amount - m.amount).toFixed(2)
-    if (Math.abs(diff) <= amountTolerance) {
-      matches.push({ transactionId: m.transactionId, merchant: m, bank: b, status: 'matched', diff: 0 })
-    } else {
-      matches.push({ transactionId: m.transactionId, merchant: m, bank: b, status: 'amount_mismatch', diff })
-    }
+if (Math.abs(diff) === 0) {
+  matches.push({
+    transactionId: m.transactionId,
+    merchant: m,
+    bank: b,
+    status: 'matched',
+    diff: 0,
+    matchReason: 'EXACT_ID',
+  })
+} else if (Math.abs(diff) <= amountTolerance) {
+  matches.push({
+    transactionId: m.transactionId,
+    merchant: m,
+    bank: b,
+    status: 'matched',
+    diff: 0,
+    matchReason: 'AMOUNT_TOLERANCE',
+  })
+} else {
+  matches.push({
+    transactionId: m.transactionId,
+    merchant: m,
+    bank: b,
+    status: 'amount_mismatch',
+    diff,
+    matchReason: 'AMOUNT_MISMATCH',
+  })
+}
 
     // mark bank row as consumed
     bankMap.delete(key)
   }
 
   // Pass 2: whatever remains in bankMap was not in merchant
-  for (const [, b] of bankMap) {
-    matches.push({ transactionId: b.transactionId, merchant: null, bank: b, status: 'missing_in_merchant', diff: 0 })
-  }
+// Pass 2: whatever remains in bankMap was not in merchant
+for (const [, b] of bankMap) {
+  matches.push({
+    transactionId: b.transactionId,
+    merchant: null,
+    bank: b,
+    status: 'missing_in_merchant',
+    diff: 0,
+    matchReason: 'MISSING_IN_MERCHANT',
+  })
+}
 
   const totals = computeTotals(matches)
   return { matches, totals }
