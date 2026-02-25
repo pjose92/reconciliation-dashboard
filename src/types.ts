@@ -62,7 +62,16 @@ export interface ReconMatch {
   transactionId: string
   merchant: MerchantTxn | null
   bank: BankTxn | null
-  status: 'matched' | 'missing_in_bank' | 'missing_in_merchant' | 'amount_mismatch'
+  status:
+    | 'matched'
+    | 'missing_in_bank'
+    | 'missing_in_merchant'
+    | 'amount_mismatch'
+
   diff: number
-  matchReason: MatchReason
+  matchReason: string
+
+  // 🔥 NEW
+  overrideStatus?: 'matched' | 'approved_mismatch'
+  overrideReason?: string
 }
