@@ -9,9 +9,60 @@ const status = ref<
   'all' | 'matched' | 'missing_in_bank' | 'missing_in_merchant' | 'amount_mismatch'
 >('all')
 
+function formatStatus(s: string) {
+  return s.replace(/_/g, ' ')
+}
+
+function effectiveStatus(r: ReconMatch) {
+  return r.overrideStatus ?? r.status
+}
+
+/* =========================
+   🔥 Manual Override Logic
+========================= */
+
+function approveMismatch(r: ReconMatch) {
+  r.overrideStatus = 'approved_mismatch'
+  r.overrideReason = 'Manually approved by user'
+}
+
+function forceMatch(r: ReconMatch) {
+  // Missing in bank → clone merchant into bank
+  if (r.status === 'missing_in_bank' && r.merchant && !r.bank) {
+    r.bank = {
+      transactionId: r.merchant.transactionId,
+      amount: r.merchant.amount,
+      date: r.merchant.date,
+    } as any
+  }
+
+  // Missing in merchant → clone bank into merchant
+  if (r.status === 'missing_in_merchant' && r.bank && !r.merchant) {
+    r.merchant = {
+      transactionId: r.bank.transactionId,
+      amount: r.bank.amount,
+      date: r.bank.date,
+    } as any
+  }
+
+  r.diff = 0
+  r.overrideStatus = 'matched'
+  r.overrideReason = 'Manually force-matched'
+}
+
+function clearOverride(r: ReconMatch) {
+  r.overrideStatus = undefined
+  r.overrideReason = undefined
+}
+
+/* =========================
+   Filtering (uses override)
+========================= */
+
 const filtered = computed(() => {
   return props.rows.filter((r) => {
-    const inStatus = status.value === 'all' ? true : r.status === status.value
+    const current = effectiveStatus(r)
+    const inStatus = status.value === 'all' ? true : current === status.value
 
     const q = query.value.trim().toLowerCase()
     const inQuery = q
@@ -25,10 +76,6 @@ const filtered = computed(() => {
 })
 
 const rowCount = computed(() => filtered.value.length)
-
-function formatStatus(s: string) {
-  return s.replace(/_/g, ' ')
-}
 </script>
 
 <template>
@@ -74,19 +121,50 @@ function formatStatus(s: string) {
           <tr
             v-for="(r, i) in filtered"
             :key="r.transactionId + '-' + i"
-            :class="r.status"
+            :class="effectiveStatus(r)"
           >
             <td><code>{{ r.transactionId }}</code></td>
 
+            <!-- STATUS + ACTIONS -->
             <td>
-              <span class="badge" :class="r.status">
-                {{ formatStatus(r.status) }}
+              <span class="badge" :class="effectiveStatus(r)">
+                {{ formatStatus(effectiveStatus(r)) }}
               </span>
+
+              <div class="actions">
+                <!-- Approve mismatch -->
+                <button
+                  v-if="r.status === 'amount_mismatch' && !r.overrideStatus"
+                  @click="approveMismatch(r)"
+                  class="link"
+                >
+                  Approve
+                </button>
+
+                <!-- Force match missing -->
+                <button
+                  v-if="(r.status === 'missing_in_bank' || r.status === 'missing_in_merchant') && !r.overrideStatus"
+                  @click="forceMatch(r)"
+                  class="link"
+                >
+                  Force Match
+                </button>
+
+                <!-- Reset override -->
+                <button
+                  v-if="r.overrideStatus"
+                  @click="clearOverride(r)"
+                  class="link danger"
+                >
+                  Reset
+                </button>
+              </div>
             </td>
 
+            <!-- REASON -->
             <td>
               <small class="reason">
-                {{ r.matchReason }}
+                {{ r.overrideReason ?? r.matchReason }}
               </small>
             </td>
 
@@ -118,13 +196,18 @@ function formatStatus(s: string) {
 .table th, .table td {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
-  white-space: nowrap;
+  white-space: nowrap;  
+}
+
+td {
+  color: black;
 }
 
 tr.matched { background: #f5fff7; }
 tr.missing_in_bank { background: #fff7f7; }
 tr.missing_in_merchant { background: #fffaf2; }
 tr.amount_mismatch { background: #fffaf2; }
+tr.approved_mismatch { background: #eef2ff; }
 
 .badge {
   padding: 4px 8px;
@@ -138,6 +221,7 @@ tr.amount_mismatch { background: #fffaf2; }
 .badge.missing_in_bank { background:#ffdcdc; color:#a80000; }
 .badge.missing_in_merchant { background:#ffe9c9; color:#a05a00; }
 .badge.amount_mismatch { background:#ffe9c9; color:#a05a00; }
+.badge.approved_mismatch { background:#e0e7ff; color:#3730a3; }
 
 .reason {
   color:#666;
@@ -157,5 +241,29 @@ tr.amount_mismatch { background: #fffaf2; }
 .count {
   margin-left:auto;
   font-weight:600;
+}
+
+/* Override buttons */
+.actions {
+  display:flex;
+  gap:6px;
+  margin-top:4px;
+}
+
+.link {
+  background:none;
+  border:none;
+  padding:0;
+  font-size:11px;
+  cursor:pointer;
+  color:#2563eb;
+}
+
+.link:hover {
+  text-decoration:underline;
+}
+
+.link.danger {
+  color:#b91c1c;
 }
 </style>
